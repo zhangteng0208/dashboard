@@ -137,6 +137,8 @@ let processPollTimer: number | null = null;
 let hermesPollTimer: number | null = null;
 let historyPollTimer: number | null = null;
 
+const BACKEND_URL = 'http://127.0.0.1:18788';
+
 function clamp(value: number, max: number): number {
   return Math.min(Math.max(value, 0), max);
 }
@@ -173,6 +175,9 @@ function getChartPath(data: any[], key: 'cpu' | 'memory', maxVal: number): strin
   return `M0,${h} L${points.join(' L')} L${w},${h} Z`;
 }
 
+const cpuChartPath = computed(() => getChartPath(historyData.value, 'cpu', 100));
+const memChartPath = computed(() => getChartPath(historyData.value, 'memory', 100));
+
 const sortedProcesses = computed(() => {
   let sorted = [...processes.value];
   if (processSearch.value) {
@@ -200,7 +205,7 @@ function changePersonality() {
 async function fetchBackendStatus() {
   try {
     // Direct HTTP call to backend instead of Tauri invoke
-    const res = await fetch('http://127.0.0.1:18788/health');
+    const res = await fetch(`${BACKEND_URL}/health`);
     if (res.ok) {
       const data = await res.json();
       backendStatus.value = {
@@ -209,7 +214,7 @@ async function fetchBackendStatus() {
         port: 18788,
         healthy: true
       };
-      backendUrl.value = 'http://127.0.0.1:18788/';
+      backendUrl.value = `${BACKEND_URL}/`;
       return backendStatus.value;
     }
     throw new Error('Backend not healthy');
@@ -728,11 +733,11 @@ onUnmounted(() => {
                         </filter>
                       </defs>
                       <!-- CPU fill and line with glow -->
-                      <path :d="getChartPath(historyData, 'cpu', 100)" fill="url(#cpuGrad)" stroke="none"/>
-                      <path :d="getChartPath(historyData, 'cpu', 100)" fill="none" stroke="#ff6b35" stroke-width="2" opacity="0.9" filter="url(#cpuGlow)"/>
+                      <path :d="cpuChartPath" fill="url(#cpuGrad)" stroke="none"/>
+                      <path :d="cpuChartPath" fill="none" stroke="#ff6b35" stroke-width="2" opacity="0.9" filter="url(#cpuGlow)"/>
                       <!-- Memory fill and line with glow -->
-                      <path :d="getChartPath(historyData, 'memory', 100)" fill="url(#memGrad)" stroke="none"/>
-                      <path :d="getChartPath(historyData, 'memory', 100)" fill="none" stroke="#00fff9" stroke-width="2" opacity="0.9" filter="url(#memGlow)"/>
+                      <path :d="memChartPath" fill="url(#memGrad)" stroke="none"/>
+                      <path :d="memChartPath" fill="none" stroke="#00fff9" stroke-width="2" opacity="0.9" filter="url(#memGlow)"/>
                       <!-- Hover cursor -->
                       <g v-if="chartHover" class="chart-cursor">
                         <line :x1="chartHover.x" y1="0" :x2="chartHover.x" y2="80" stroke="#ffffff" stroke-width="1" stroke-dasharray="2,2" opacity="0.5"/>

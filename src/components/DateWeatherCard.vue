@@ -162,6 +162,14 @@ function getElementClass(name: string): string {
 }
 
 
+function getHourLuckList(currentShichen: number) {
+  return hourNames.map((n, idx) => ({
+    name: n,
+    luck: idx === currentShichen ? '凶' : (idx % 3 === 0 ? '凶' : '吉'),
+    isCurrent: idx === currentShichen
+  }))
+}
+
 function updateTime() {
   const now = new Date()
   const h = now.getHours().toString().padStart(2, '0')
@@ -173,11 +181,7 @@ function updateTime() {
   if (data.value) {
     const currentHour = now.getHours()
     const currentShichen = Math.floor(currentHour / 2) % 12
-    data.value.hourLuck = hourNames.map((n, idx) => ({
-      name: n,
-      luck: idx === currentShichen ? '凶' : (idx % 3 === 0 ? '凶' : '吉'),
-      isCurrent: idx === currentShichen
-    }))
+    data.value.hourLuck = getHourLuckList(currentShichen)
   }
 }
 
@@ -299,11 +303,7 @@ function init() {
     if (lunarDayNum === 13) buddhistEvents.push('杨忌')
 
     const currentShichen = Math.floor(hour / 2) % 12
-    const hourLuckList = hourNames.map((n, idx) => ({
-      name: n,
-      luck: idx === currentShichen ? '凶' : (idx % 3 === 0 ? '凶' : '吉'),
-      isCurrent: idx === currentShichen
-    }))
+    const hourLuckList = getHourLuckList(currentShichen)
 
     // Calendar data
     const calDays: any[] = []

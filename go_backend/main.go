@@ -77,6 +77,14 @@ func getCachedHermes(key string) []byte {
 func setCachedHermes(key string, data []byte) {
 	hermesCacheMu.Lock()
 	defer hermesCacheMu.Unlock()
+	// Cleanup expired entries if map is getting large
+	if len(hermesCache) > 100 {
+		for k, v := range hermesCache {
+			if v.expiresAt.Before(time.Now()) {
+				delete(hermesCache, k)
+			}
+		}
+	}
 	hermesCache[key] = cacheEntry{data: data, expiresAt: time.Now().Add(hermesTTL)}
 }
 
