@@ -134,6 +134,8 @@ const showClipboard = ref(false);
 
 let pollTimer: number | null = null;
 let processPollTimer: number | null = null;
+let hermesPollTimer: number | null = null;
+let historyPollTimer: number | null = null;
 
 function clamp(value: number, max: number): number {
   return Math.min(Math.max(value, 0), max);
@@ -470,13 +472,15 @@ onMounted(async () => {
   // Fallback polling (also provides initial data before WS connects)
   pollTimer = window.setInterval(poll, 30000);
   processPollTimer = window.setInterval(pollProcesses, 30000);
-  setInterval(pollHermes, 30000);
-  setInterval(fetchHistory, 30000);
+  hermesPollTimer = window.setInterval(pollHermes, 30000);
+  historyPollTimer = window.setInterval(fetchHistory, 30000);
 });
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
   if (processPollTimer) clearInterval(processPollTimer);
+  if (hermesPollTimer) clearInterval(hermesPollTimer);
+  if (historyPollTimer) clearInterval(historyPollTimer);
   disconnectWebSocket();
 });
 </script>

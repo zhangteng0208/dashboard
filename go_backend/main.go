@@ -45,6 +45,8 @@ const (
 	configTTL   = 60 * time.Second
 )
 
+var tcpPortRegex = regexp.MustCompile(`TCP (\S+?):(\d+)`)
+
 func getCachedSysStats() map[string]interface{} {
 	sysStatsMu.RLock()
 	defer sysStatsMu.RUnlock()
@@ -511,7 +513,7 @@ func portsHandler(w http.ResponseWriter, r *http.Request) {
 	lines := strings.Split(string(out), "\n")
 	var ports []PortInfo
 
-	re := regexp.MustCompile(`TCP (\S+?):(\d+)`)
+	re := tcpPortRegex
 
 	// First pass: collect all PIDs
 	var pids []int
