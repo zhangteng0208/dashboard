@@ -416,6 +416,13 @@ func projectOpenHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// 验证路径安全性，防止命令注入
+		// 禁止的字符：引号、反引号、美元符、分号、换行等
+		if strings.ContainsAny(req.Path, "\"'`$\\;|\n\r") {
+			http.Error(w, `{"error":"路径包含非法字符"}`, 400)
+			return
+		}
+
 		var cmd *exec.Cmd
 		if req.Action == "terminal" {
 			cmd = exec.Command("osascript", "-e", `tell application "Terminal" to do script "cd `+req.Path+` && clear"`)
