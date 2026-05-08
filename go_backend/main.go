@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -234,6 +235,42 @@ func historyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func projectsHandler(w http.ResponseWriter, r *http.Request) {
+	// POST: 添加新项目
+	if r.Method == "POST" {
+		var req struct{ Path string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"无效的请求体"}`, 400)
+			return
+		}
+
+		// 验证路径存在且是目录
+		info, err := os.Stat(req.Path)
+		if err != nil || !info.IsDir() {
+			http.Error(w, `{"error":"路径不存在或不是目录"}`, 400)
+			return
+		}
+
+		// 提取项目名（目录名）
+		name := filepath.Base(req.Path)
+
+		// 插入数据库
+		result, err := DB.Exec(
+			"INSERT OR IGNORE INTO projects (path, name) VALUES (?, ?)",
+			req.Path, name,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		id, _ := result.LastInsertId()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": id, "path": req.Path, "name": name,
+		})
+		return
+	}
+
 	rows, err := DB.Query("SELECT id, path, name, tech_stack, git_branch, git_dirty, git_commit, git_commit_msg, git_commit_author, git_commit_date, created_at, updated_at FROM projects ORDER BY id DESC")
 	if err != nil {
 		http.Error(w, err.Error(), 500)
