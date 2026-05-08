@@ -243,6 +243,12 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// 验证路径非空
+		if req.Path == "" {
+			http.Error(w, `{"error":"path 不能为空"}`, 400)
+			return
+		}
+
 		// 验证路径存在且是目录
 		info, err := os.Stat(req.Path)
 		if err != nil || !info.IsDir() {
@@ -263,7 +269,11 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		id, _ := result.LastInsertId()
+		id, err := result.LastInsertId()
+		if err != nil {
+			http.Error(w, `{"error":"添加失败"}`, 500)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"id": id, "path": req.Path, "name": name,
