@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -291,7 +292,9 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		// 检查是否是 git 仓库
 		gitDir := projPath + "/.git"
 		if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-			DB.Exec("UPDATE projects SET git_branch='', git_dirty=0, git_commit='', git_commit_msg='', git_commit_author='', git_commit_date=NULL, updated_at=CURRENT_TIMESTAMP WHERE id = ?", projectID)
+			if _, err := DB.Exec("UPDATE projects SET git_branch='', git_dirty=0, git_commit='', git_commit_msg='', git_commit_author='', git_commit_date=NULL, updated_at=CURRENT_TIMESTAMP WHERE id = ?", projectID); err != nil {
+				log.Printf("Failed to clear git info: %v", err)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{"hasGit": false})
 			return
@@ -299,14 +302,16 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 
 		// 获取 git 信息（在项目目录下执行）
 		gitInfo := scanGitInfo(projPath)
-		DB.Exec(`
+		if _, err := DB.Exec(`
 			UPDATE projects SET
 				git_branch=?, git_dirty=?, git_commit=?,
 				git_commit_msg=?, git_commit_author=?, git_commit_date=?,
 				updated_at=CURRENT_TIMESTAMP
 			WHERE id = ?
 		`, gitInfo["branch"], gitInfo["dirty"], gitInfo["commit"],
-			gitInfo["commitMsg"], gitInfo["commitAuthor"], gitInfo["commitDate"], projectID)
+			gitInfo["commitMsg"], gitInfo["commitAuthor"], gitInfo["commitDate"], projectID); err != nil {
+			log.Printf("Failed to update git info: %v", err)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(gitInfo)
@@ -404,19 +409,33 @@ func scanGitInfo(projPath string) map[string]interface{} {
 		"commitMsg": "", "commitAuthor": "", "commitDate": "",
 	}
 
+	// 验证 projPath 必须为目录
+	info, err := os.Stat(projPath)
+	if err != nil || !info.IsDir() {
+		return result
+	}
+
+	// 创建 10 秒超时的 context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	// branch
-	if out, err := exec.Command("git", "-C", projPath, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+	cmd := exec.CommandContext(ctx, "git", "-C", projPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if out, err := cmd.Output(); err == nil {
 		result["branch"] = strings.TrimSpace(string(out))
 	}
 
 	// status --porcelain (检查是否 dirty)
-	if out, err := exec.Command("git", "-C", projPath, "status", "--porcelain").Output(); err == nil {
+	cmd = exec.CommandContext(ctx, "git", "-C", projPath, "status", "--porcelain")
+	if out, err := cmd.Output(); err == nil {
 		result["dirty"] = len(strings.TrimSpace(string(out))) > 0
 	}
 
 	// log -1 获取最新提交信息
-	if out, err := exec.Command("git", "-C", projPath, "log", "-1", "--format=%H|%s|%an|%ai").Output(); err == nil {
-		parts := strings.Split(strings.TrimSpace(string(out)), "|")
+	cmd = exec.CommandContext(ctx, "git", "-C", projPath, "log", "-1", "--format=%H|%s|%an|%ai")
+	if out, err := cmd.Output(); err == nil {
+		// 使用 SplitN 限制分割数量，避免 commit message 中包含 | 导致解析错误
+		parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 4)
 		if len(parts) >= 4 {
 			fullCommit := parts[0]
 			if len(fullCommit) >= 7 {
