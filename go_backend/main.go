@@ -235,6 +235,40 @@ func historyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func projectsHandler(w http.ResponseWriter, r *http.Request) {
+	// DELETE: 删除指定项目
+	if r.Method == "DELETE" {
+		// 提取 ID (URL path: /api/projects/123)
+		id := strings.TrimPrefix(r.URL.Path, "/api/projects/")
+		if id == "" || id == r.URL.Path {
+			http.Error(w, `{"error":"项目ID不能为空"}`, 400)
+			return
+		}
+
+		// 验证 ID 为有效整数
+		projectID, err := strconv.Atoi(id)
+		if err != nil || projectID <= 0 {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		// 检查项目是否存在
+		var exists int
+		err = DB.QueryRow("SELECT 1 FROM projects WHERE id = ?", projectID).Scan(&exists)
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"项目不存在"}`, 404)
+			return
+		}
+
+		// 删除项目
+		_, err = DB.Exec("DELETE FROM projects WHERE id = ?", projectID)
+		if err != nil {
+			http.Error(w, `{"error":"删除失败"}`, 500)
+			return
+		}
+		w.WriteHeader(204)
+		return
+	}
+
 	// POST: 添加新项目
 	if r.Method == "POST" {
 		var req struct{ Path string }
@@ -281,6 +315,7 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET: 列出所有项目
 	rows, err := DB.Query("SELECT id, path, name, tech_stack, git_branch, git_dirty, git_commit, git_commit_msg, git_commit_author, git_commit_date, created_at, updated_at FROM projects ORDER BY id DESC")
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -1750,6 +1785,7 @@ func main() {
 	// Dashboard APIs
 	mux.HandleFunc("/api/dashboard", dashboardHandler)
 	mux.HandleFunc("/api/projects", projectsHandler)
+	mux.HandleFunc("/api/projects/", projectsHandler) // 处理 /api/projects/:id 路由
 	mux.HandleFunc("/api/history", historyHandler)
 	mux.HandleFunc("/api/system", systemHandler)
 	mux.HandleFunc("/api/processes", processesHandler)
