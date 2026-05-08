@@ -402,6 +402,35 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"projects": results})
 }
 
+// projectOpenHandler 处理使用 Finder 或 Terminal 打开项目路径的请求
+func projectOpenHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		var req struct {
+			Path   string `json:"path"`
+			Action string `json:"action"` // "finder" or "terminal"
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.Path == "" {
+			http.Error(w, `{"error":"path 不能为空"}`, 400)
+			return
+		}
+
+		var cmd *exec.Cmd
+		if req.Action == "terminal" {
+			cmd = exec.Command("osascript", "-e", `tell application "Terminal" to do script "cd `+req.Path+` && clear"`)
+		} else {
+			cmd = exec.Command("open", req.Path)
+		}
+		if err := cmd.Run(); err != nil {
+			log.Printf("Failed to open %s: %v", req.Action, err)
+			http.Error(w, `{"error":"打开失败"}`, 500)
+			return
+		}
+		w.WriteHeader(204)
+	}
+}
+
 // scanGitInfo 在指定目录下执行 git 命令获取 Git 信息
 func scanGitInfo(projPath string) map[string]interface{} {
 	result := map[string]interface{}{
@@ -1883,6 +1912,7 @@ func main() {
 	mux.HandleFunc("/api/dashboard", dashboardHandler)
 	mux.HandleFunc("/api/projects", projectsHandler)
 	mux.HandleFunc("/api/projects/", projectsHandler) // 处理 /api/projects/:id 路由
+	mux.HandleFunc("/api/projects/open", projectOpenHandler)
 	mux.HandleFunc("/api/history", historyHandler)
 	mux.HandleFunc("/api/system", systemHandler)
 	mux.HandleFunc("/api/processes", processesHandler)
