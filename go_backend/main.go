@@ -269,6 +269,50 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// POST: 扫描项目 Git 信息（需要放在添加新项目之前，因为更具体）
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/scan") {
+		// 提取 id
+		path := strings.TrimSuffix(r.URL.Path, "/scan")
+		idStr := strings.TrimPrefix(path, "/api/projects/")
+		projectID, err := strconv.Atoi(idStr)
+		if err != nil || projectID <= 0 {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		// 获取项目路径
+		var projPath string
+		err = DB.QueryRow("SELECT path FROM projects WHERE id = ?", projectID).Scan(&projPath)
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"项目不存在"}`, 404)
+			return
+		}
+
+		// 检查是否是 git 仓库
+		gitDir := projPath + "/.git"
+		if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+			DB.Exec("UPDATE projects SET git_branch='', git_dirty=0, git_commit='', git_commit_msg='', git_commit_author='', git_commit_date=NULL, updated_at=CURRENT_TIMESTAMP WHERE id = ?", projectID)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"hasGit": false})
+			return
+		}
+
+		// 获取 git 信息（在项目目录下执行）
+		gitInfo := scanGitInfo(projPath)
+		DB.Exec(`
+			UPDATE projects SET
+				git_branch=?, git_dirty=?, git_commit=?,
+				git_commit_msg=?, git_commit_author=?, git_commit_date=?,
+				updated_at=CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, gitInfo["branch"], gitInfo["dirty"], gitInfo["commit"],
+			gitInfo["commitMsg"], gitInfo["commitAuthor"], gitInfo["commitDate"], projectID)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(gitInfo)
+		return
+	}
+
 	// POST: 添加新项目
 	if r.Method == "POST" {
 		var req struct{ Path string }
@@ -351,6 +395,40 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"projects": results})
+}
+
+// scanGitInfo 在指定目录下执行 git 命令获取 Git 信息
+func scanGitInfo(projPath string) map[string]interface{} {
+	result := map[string]interface{}{
+		"branch": "", "dirty": false, "commit": "",
+		"commitMsg": "", "commitAuthor": "", "commitDate": "",
+	}
+
+	// branch
+	if out, err := exec.Command("git", "-C", projPath, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+		result["branch"] = strings.TrimSpace(string(out))
+	}
+
+	// status --porcelain (检查是否 dirty)
+	if out, err := exec.Command("git", "-C", projPath, "status", "--porcelain").Output(); err == nil {
+		result["dirty"] = len(strings.TrimSpace(string(out))) > 0
+	}
+
+	// log -1 获取最新提交信息
+	if out, err := exec.Command("git", "-C", projPath, "log", "-1", "--format=%H|%s|%an|%ai").Output(); err == nil {
+		parts := strings.Split(strings.TrimSpace(string(out)), "|")
+		if len(parts) >= 4 {
+			fullCommit := parts[0]
+			if len(fullCommit) >= 7 {
+				result["commit"] = fullCommit[:7]
+			}
+			result["commitMsg"] = parts[1]
+			result["commitAuthor"] = parts[2]
+			result["commitDate"] = parts[3]
+		}
+	}
+
+	return result
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
