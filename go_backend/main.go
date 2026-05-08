@@ -132,6 +132,26 @@ func initDB() {
 			network_down REAL
 		)
 	`)
+	// 创建 projects 表
+	_, err = DB.Exec(`
+		CREATE TABLE IF NOT EXISTS projects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			path TEXT UNIQUE NOT NULL,
+			name TEXT NOT NULL,
+			tech_stack TEXT,
+			git_branch TEXT,
+			git_dirty INTEGER DEFAULT 0,
+			git_commit TEXT,
+			git_commit_msg TEXT,
+			git_commit_author TEXT,
+			git_commit_date DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		log.Printf("Failed to create projects table: %v", err)
+	}
 }
 
 type HealthResponse struct {
@@ -187,6 +207,9 @@ func historyHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var results []map[string]interface{}
+	if results == nil {
+		results = []map[string]interface{}{}
+	}
 	for rows.Next() {
 		var timestamp string
 		var cpu, memory, disk, networkUp, networkDown float64
@@ -208,6 +231,44 @@ func historyHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
+}
+
+func projectsHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := DB.Query("SELECT id, path, name, tech_stack, git_branch, git_dirty, git_commit, git_commit_msg, git_commit_author, git_commit_date, created_at, updated_at FROM projects ORDER BY id DESC")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	if results == nil {
+		results = []map[string]interface{}{}
+	}
+	for rows.Next() {
+		var id int
+		var path, name string
+		var techStack, gitBranch, gitCommit, gitCommitMsg, gitCommitAuthor, gitCommitDate, createdAt, updatedAt *string
+		var gitDirty int
+		rows.Scan(&id, &path, &name, &techStack, &gitBranch, &gitDirty, &gitCommit, &gitCommitMsg, &gitCommitAuthor, &gitCommitDate, &createdAt, &updatedAt)
+		results = append(results, map[string]interface{}{
+			"id": id,
+			"path": path,
+			"name": name,
+			"tech_stack": techStack,
+			"git_branch": gitBranch,
+			"git_dirty": gitDirty,
+			"git_commit": gitCommit,
+			"git_commit_msg": gitCommitMsg,
+			"git_commit_author": gitCommitAuthor,
+			"git_commit_date": gitCommitDate,
+			"created_at": createdAt,
+			"updated_at": updatedAt,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"projects": results})
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -1050,6 +1111,95 @@ func hermesHandler(pattern string) http.HandlerFunc {
 			}
 		case "logs":
 			resp["logs"] = []string{}
+		case "insights":
+			insightsCmd := exec.Command("hermes", "insights", "--days", "1")
+			insightsOut, insightsErr := insightsCmd.Output()
+			if insightsErr != nil {
+				resp["insights"] = map[string]interface{}{}
+			} else {
+				insightsOutput := string(insightsOut)
+				insightsData := map[string]interface{}{}
+				if sessionsMatch := regexp.MustCompile(`Sessions:\s*(\d+)`).FindStringSubmatch(insightsOutput); len(sessionsMatch) > 1 {
+					insightsData["sessions"], _ = strconv.Atoi(sessionsMatch[1])
+				}
+				if messagesMatch := regexp.MustCompile(`Messages:\s*([\d,]+)`).FindStringSubmatch(insightsOutput); len(messagesMatch) > 1 {
+					msgStr := strings.ReplaceAll(messagesMatch[1], ",", "")
+					insightsData["messages"], _ = strconv.Atoi(msgStr)
+				}
+				if toolMatch := regexp.MustCompile(`Tool calls:\s*([\d,]+)`).FindStringSubmatch(insightsOutput); len(toolMatch) > 1 {
+					toolStr := strings.ReplaceAll(toolMatch[1], ",", "")
+					insightsData["tool_calls"], _ = strconv.Atoi(toolStr)
+				}
+				if inputMatch := regexp.MustCompile(`Input tokens:\s*([\d,]+)`).FindStringSubmatch(insightsOutput); len(inputMatch) > 1 {
+					inputStr := strings.ReplaceAll(inputMatch[1], ",", "")
+					insightsData["input_tokens"], _ = strconv.ParseInt(inputStr, 10, 64)
+				}
+				if outputMatch := regexp.MustCompile(`Output tokens:\s*([\d,]+)`).FindStringSubmatch(insightsOutput); len(outputMatch) > 1 {
+					outputStr := strings.ReplaceAll(outputMatch[1], ",", "")
+					insightsData["output_tokens"], _ = strconv.ParseInt(outputStr, 10, 64)
+				}
+				if totalMatch := regexp.MustCompile(`Total tokens:\s*([\d,]+)`).FindStringSubmatch(insightsOutput); len(totalMatch) > 1 {
+					totalStr := strings.ReplaceAll(totalMatch[1], ",", "")
+					insightsData["total_tokens"], _ = strconv.ParseInt(totalStr, 10, 64)
+				}
+				platformsData := []map[string]interface{}{}
+				platformLines := regexp.MustCompile(`(?m)^(\w+)\s+(\d+)\s+([\d,]+)\s+([\d,]+)`).FindAllStringSubmatch(insightsOutput, -1)
+				for _, match := range platformLines {
+					if len(match) > 4 && match[1] != "Platform" {
+						msgStr := strings.ReplaceAll(match[3], ",", "")
+						tokStr := strings.ReplaceAll(match[4], ",", "")
+						platformsData = append(platformsData, map[string]interface{}{
+							"platform": match[1],
+							"messages": msgStr,
+							"tokens":   tokStr,
+						})
+					}
+				}
+				insightsData["platforms"] = platformsData
+				resp["insights"] = insightsData
+			}
+		case "skills":
+			skillsCmd := exec.Command("hermes", "skills", "list")
+			skillsOut, skillsErr := skillsCmd.Output()
+			if skillsErr != nil {
+				resp["skills"] = []map[string]interface{}{}
+			} else {
+				skillsOutput := string(skillsOut)
+				skillsData := []map[string]interface{}{}
+				lines := strings.Split(skillsOutput, "\n")
+				for _, line := range lines {
+					if strings.Contains(line, "│") && !strings.Contains(line, "━") && !strings.Contains(line, "┏") && !strings.Contains(line, "┃") && !strings.Contains(line, "┡") && !strings.HasPrefix(strings.TrimSpace(line), "0 hub-installed") {
+						parts := strings.Split(line, "│")
+						if len(parts) >= 4 {
+							name := strings.TrimSpace(parts[1])
+							category := strings.TrimSpace(parts[2])
+							source := strings.TrimSpace(parts[3])
+							if name != "" && name != "Name" && !strings.Contains(name, "─") {
+								skillsData = append(skillsData, map[string]interface{}{
+									"name":      name,
+									"category":  category,
+									"source":    source,
+									"icon":      name[:1],
+								})
+							}
+						}
+					}
+				}
+				resp["skills"] = skillsData
+			}
+		case "quota":
+			quotaCmd := exec.Command("mmx", "quota")
+			quotaOut, quotaErr := quotaCmd.Output()
+			if quotaErr != nil {
+				resp["quota"] = map[string]interface{}{}
+			} else {
+				var quotaResult map[string]interface{}
+				if err := json.Unmarshal(quotaOut, &quotaResult); err != nil {
+					resp["quota"] = map[string]interface{}{}
+				} else {
+					resp["quota"] = quotaResult
+				}
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -1091,15 +1241,30 @@ func terminalGhosttyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	script := fmt.Sprintf(`
-tell application "Ghostty"
+	escapedCmd := strings.Replace(req.Command, `"`, `\"`, -1)
+	script := fmt.Sprintf(`tell application "Terminal"
     activate
-    delay 0.3
     do script "%s"
-end tell
-`, strings.Replace(req.Command, `"`, `\"`, -1))
+end tell`, escapedCmd)
 
-	cmd := exec.Command("osascript", "-e", script)
+	tmpfile, err := os.CreateTemp("", "terminal-*.scpt")
+	if err != nil {
+		resp := map[string]interface{}{"exit_code": 1, "stderr": err.Error()}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.WriteString(script); err != nil {
+		resp := map[string]interface{}{"exit_code": 1, "stderr": err.Error()}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+	tmpfile.Close()
+
+	cmd := exec.Command("osascript", tmpfile.Name())
 	out, err := cmd.CombinedOutput()
 
 	resp := map[string]interface{}{
@@ -1537,6 +1702,7 @@ func main() {
 
 	// Dashboard APIs
 	mux.HandleFunc("/api/dashboard", dashboardHandler)
+	mux.HandleFunc("/api/projects", projectsHandler)
 	mux.HandleFunc("/api/history", historyHandler)
 	mux.HandleFunc("/api/system", systemHandler)
 	mux.HandleFunc("/api/processes", processesHandler)
@@ -1555,6 +1721,9 @@ func main() {
 	mux.HandleFunc("/api/hermes/version", hermesHandler("version"))
 	mux.HandleFunc("/api/hermes/gateway-state", hermesHandler("gateway-state"))
 	mux.HandleFunc("/api/hermes/logs", hermesHandler("logs"))
+	mux.HandleFunc("/api/hermes/insights", hermesHandler("insights"))
+	mux.HandleFunc("/api/hermes/skills", hermesHandler("skills"))
+	mux.HandleFunc("/api/hermes/quota", hermesHandler("quota"))
 
 	// Terminal
 	mux.HandleFunc("/api/terminal/exec", terminalExecHandler)
