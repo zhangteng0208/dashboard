@@ -154,6 +154,43 @@ func initDB() {
 	if err != nil {
 		log.Printf("Failed to create projects table: %v", err)
 	}
+
+	// projects 表新增 alias 和 description 字段
+	_, err = db.Exec("ALTER TABLE projects ADD COLUMN alias TEXT")
+	if err != nil && err.Error() != "UNIQUE constraint failed: projects.alias" {
+		log.Printf("projects alias column may already exist: %v", err)
+	}
+
+	_, err = db.Exec("ALTER TABLE projects ADD COLUMN description TEXT")
+	if err != nil && err.Error() != "UNIQUE constraint failed: projects.description" {
+		log.Printf("projects description column may already exist: %v", err)
+	}
+
+	// 创建 project_tags 表
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS project_tags (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			color TEXT NOT NULL DEFAULT '#0a84ff'
+		)
+	`)
+	if err != nil {
+		log.Printf("Failed to create project_tags table: %v", err)
+	}
+
+	// 创建 project_tag_relations 表
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS project_tag_relations (
+			project_id INTEGER,
+			tag_id INTEGER,
+			PRIMARY KEY (project_id, tag_id),
+			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+			FOREIGN KEY (tag_id) REFERENCES project_tags(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		log.Printf("Failed to create project_tag_relations table: %v", err)
+	}
 }
 
 type HealthResponse struct {
