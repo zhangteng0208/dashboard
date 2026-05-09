@@ -768,6 +768,44 @@ func scanGitRemote(projPath string) map[string]interface{} {
 	return result
 }
 
+// scanGitBranches 获取所有分支及最后提交信息
+func scanGitBranches(projPath string) []map[string]interface{} {
+	var branches []map[string]interface{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// git branch -a --format='%(refname:short)|%(objectname:short)|%(subject)|%(committerdate:iso)'
+	cmd := exec.CommandContext(ctx, "git", "-C", projPath, "branch", "-a",
+		"--format=%(refname:short)|%(objectname:short)|%(subject)|%(committerdate:iso)")
+	out, err := cmd.Output()
+	if err != nil {
+		return branches
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) >= 4 {
+			name := parts[0]
+			commit := parts[1]
+			msg := parts[2]
+			date := parts[3]
+			if name == "" {
+				name = "HEAD"
+			}
+			branches = append(branches, map[string]interface{}{
+				"name":           name,
+				"lastCommit":     commit,
+				"lastCommitMsg":  msg,
+				"lastCommitDate": date,
+			})
+		}
+	}
+
+	return branches
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	resp := HealthResponse{
 		Status:    "ok",
