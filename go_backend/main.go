@@ -156,18 +156,18 @@ func initDB() {
 	}
 
 	// projects 表新增 alias 和 description 字段
-	_, err = db.Exec("ALTER TABLE projects ADD COLUMN alias TEXT")
-	if err != nil && err.Error() != "UNIQUE constraint failed: projects.alias" {
+	_, err = DB.Exec("ALTER TABLE projects ADD COLUMN alias TEXT")
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
 		log.Printf("projects alias column may already exist: %v", err)
 	}
 
-	_, err = db.Exec("ALTER TABLE projects ADD COLUMN description TEXT")
-	if err != nil && err.Error() != "UNIQUE constraint failed: projects.description" {
+	_, err = DB.Exec("ALTER TABLE projects ADD COLUMN description TEXT")
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
 		log.Printf("projects description column may already exist: %v", err)
 	}
 
 	// 创建 project_tags 表
-	_, err = db.Exec(`
+	_, err = DB.Exec(`
 		CREATE TABLE IF NOT EXISTS project_tags (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL UNIQUE,
@@ -179,7 +179,7 @@ func initDB() {
 	}
 
 	// 创建 project_tag_relations 表
-	_, err = db.Exec(`
+	_, err = DB.Exec(`
 		CREATE TABLE IF NOT EXISTS project_tag_relations (
 			project_id INTEGER,
 			tag_id INTEGER,
@@ -437,6 +437,71 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"projects": results})
+}
+
+// tagsHandler 处理标签的 GET/POST 请求
+func tagsHandler(w http.ResponseWriter, r *http.Request) {
+	// GET: 列出所有标签
+	if r.Method == "GET" {
+		rows, err := DB.Query("SELECT id, name, color FROM project_tags ORDER BY name")
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		defer rows.Close()
+
+		var results []map[string]interface{}
+		for rows.Next() {
+			var id int
+			var name, color string
+			rows.Scan(&id, &name, &color)
+			results = append(results, map[string]interface{}{"id": id, "name": name, "color": color})
+		}
+		if results == nil {
+			results = []map[string]interface{}{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"tags": results})
+		return
+	}
+
+	// POST: 创建标签
+	if r.Method == "POST" {
+		var req struct {
+			Name  string `json:"name"`
+			Color string `json:"color"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"无效的请求体"}`, 400)
+			return
+		}
+		if req.Name == "" {
+			http.Error(w, `{"error":"标签名不能为空"}`, 400)
+			return
+		}
+		if req.Color == "" {
+			req.Color = "#0a84ff"
+		}
+
+		result, err := DB.Exec(
+			"INSERT INTO project_tags (name, color) VALUES (?, ?)",
+			req.Name, req.Color,
+		)
+		if err != nil {
+			if strings.Contains(err.Error(), "UNIQUE") {
+				http.Error(w, `{"error":"标签名已存在"}`, 409)
+				return
+			}
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		id, _ := result.LastInsertId()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": id, "name": req.Name, "color": req.Color,
+		})
+	}
 }
 
 // projectOpenHandler 处理使用 Finder 或 Terminal 打开项目路径的请求
@@ -1957,6 +2022,7 @@ func main() {
 	mux.HandleFunc("/api/projects", projectsHandler)
 	mux.HandleFunc("/api/projects/", projectsHandler) // 处理 /api/projects/:id 路由
 	mux.HandleFunc("/api/projects/open", projectOpenHandler)
+	mux.HandleFunc("/api/tags", tagsHandler)
 	mux.HandleFunc("/api/history", historyHandler)
 	mux.HandleFunc("/api/system", systemHandler)
 	mux.HandleFunc("/api/processes", processesHandler)
