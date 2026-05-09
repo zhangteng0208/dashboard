@@ -915,6 +915,75 @@ func scanGitBranches(projPath string) []map[string]interface{} {
 	return branches
 }
 
+// scanProjectScripts 扫描项目中的 NPM/Maven/Gradle/Go scripts
+func scanProjectScripts(projPath string) map[string]interface{} {
+	result := map[string]interface{}{
+		"framework": "", "scripts": []map[string]interface{}{},
+	}
+
+	// 检查 package.json (npm)
+	pkgFile := projPath + "/package.json"
+	if data, err := os.ReadFile(pkgFile); err == nil {
+		var pkg struct {
+			Scripts map[string]string `json:"scripts"`
+		}
+		if json.Unmarshal(data, &pkg) == nil && pkg.Scripts != nil {
+			result["framework"] = "npm"
+			var scripts []map[string]interface{}
+			for name, cmd := range pkg.Scripts {
+				scripts = append(scripts, map[string]interface{}{
+					"name":    name,
+					"command": cmd,
+					"type":    "npm",
+				})
+			}
+			result["scripts"] = scripts
+			return result
+		}
+	}
+
+	// 检查 pom.xml (Maven)
+	pomFile := projPath + "/pom.xml"
+	if _, err := os.Stat(pomFile); err == nil {
+		result["framework"] = "maven"
+		result["scripts"] = []map[string]interface{}{
+			{"name": "compile", "command": "mvn compile", "type": "maven"},
+			{"name": "test", "command": "mvn test", "type": "maven"},
+			{"name": "package", "command": "mvn package", "type": "maven"},
+			{"name": "clean", "command": "mvn clean", "type": "maven"},
+			{"name": "spring-boot:run", "command": "mvn spring-boot:run", "type": "maven"},
+		}
+		return result
+	}
+
+	// 检查 build.gradle (Gradle)
+	gradleFile := projPath + "/build.gradle"
+	if _, err := os.Stat(gradleFile); err == nil {
+		result["framework"] = "gradle"
+		result["scripts"] = []map[string]interface{}{
+			{"name": "build", "command": "./gradlew build", "type": "gradle"},
+			{"name": "test", "command": "./gradlew test", "type": "gradle"},
+			{"name": "bootRun", "command": "./gradlew bootRun", "type": "gradle"},
+			{"name": "clean", "command": "./gradlew clean", "type": "gradle"},
+		}
+		return result
+	}
+
+	// 检查 go.mod (Go)
+	goModFile := projPath + "/go.mod"
+	if _, err := os.Stat(goModFile); err == nil {
+		result["framework"] = "go"
+		result["scripts"] = []map[string]interface{}{
+			{"name": "build", "command": "go build ./...", "type": "go"},
+			{"name": "test", "command": "go test ./...", "type": "go"},
+			{"name": "run", "command": "go run .", "type": "go"},
+		}
+		return result
+	}
+
+	return result
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	resp := HealthResponse{
 		Status:    "ok",
