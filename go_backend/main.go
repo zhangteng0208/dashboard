@@ -705,6 +705,44 @@ func scanGitInfo(projPath string) map[string]interface{} {
 	return result
 }
 
+// scanGitRemote 获取 Git 远程地址
+func scanGitRemote(projPath string) map[string]interface{} {
+	result := map[string]interface{}{
+		"remoteUrl": "", "remoteType": "",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// git remote -v
+	cmd := exec.CommandContext(ctx, "git", "-C", projPath, "remote", "-v")
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("scanGitRemote: git remote -v failed for %s: %v", projPath, err)
+		return result
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			result["remoteUrl"] = parts[1]
+			// 判断类型
+			url := parts[1]
+			if strings.HasPrefix(url, "git@") {
+				result["remoteType"] = "ssh"
+			} else if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
+				result["remoteType"] = "https"
+			} else if strings.Contains(url, "github.com") {
+				result["remoteType"] = "github"
+			}
+			break
+		}
+	}
+
+	return result
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	resp := HealthResponse{
 		Status:    "ok",
