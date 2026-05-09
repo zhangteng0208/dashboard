@@ -108,6 +108,32 @@ func setCachedConfig(data map[string]interface{}) {
 	cachedConfig = cacheEntry{data: b, expiresAt: time.Now().Add(configTTL)}
 }
 
+// 允许执行的命令白名单
+var allowedCommands = map[string]bool{
+	"npm":       true,
+	"mvn":       true,
+	"gradle":    true,
+	"./gradlew": true,
+	"go":        true,
+	"git":       true,
+}
+
+func isCommandAllowed(cmd string) bool {
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return false
+	}
+	base := parts[0]
+	// 允许 npm run xxx 和 mvn xxx 格式
+	if base == "npm" && len(parts) >= 2 && parts[1] == "run" {
+		return true
+	}
+	if base == "mvn" || base == "gradle" || base == "./gradlew" || base == "go" || base == "git" {
+		return true
+	}
+	return false
+}
+
 func initDB() {
 	os.MkdirAll(os.Getenv("HOME")+"/.dashboard", 0755)
 	dbPath := os.Getenv("HOME") + "/.dashboard/dashboard.db"
@@ -308,45 +334,51 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// PATCH: 更新项目别名/简介 (全部字段必填)
-	// 注意：必须放在 PUT /tags 之前，且不能用 Contains 避免误匹配 /api/projects/1/tags
-	if r.Method == "PATCH" && !strings.Contains(r.URL.Path, "/tags") {
+	// 注意：必须放在 PUT /tags 之前，只匹配 /api/projects/{数字} 路径
+	if r.Method == "PATCH" {
+		// 只匹配 /api/projects/{数字} 路径，不匹配 /tags, /scripts 等子路径
 		pathParts := strings.Split(r.URL.Path, "/")
-		id := pathParts[len(pathParts)-1]
+		// 检查路径格式：/api/projects/{id}，共4段
+		if len(pathParts) != 4 || pathParts[1] != "api" || pathParts[2] != "projects" {
+			// 不是 PATCH /api/projects/:id，继续处理其他路由
+		} else {
+			id := pathParts[3]
+			// 检查 id 是否为数字
+			if _, err := strconv.Atoi(id); err != nil {
+				// id 不是数字，继续让其他路由处理
+			} else {
+				// 这是 PATCH /api/projects/:id，处理更新逻辑
+				projectID, _ := strconv.Atoi(id)
 
-		// 验证 id 为有效整数
-		projectID, err := strconv.Atoi(id)
-		if err != nil {
-			http.Error(w, `{"error":"无效的项目ID"}`, 400)
-			return
-		}
+				var req struct {
+					Name        string `json:"name"`
+					Alias       string `json:"alias"`
+					Description string `json:"description"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, `{"error":"无效的请求体"}`, 400)
+					return
+				}
 
-		var req struct {
-			Name        string `json:"name"`
-			Alias       string `json:"alias"`
-			Description string `json:"description"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"无效的请求体"}`, 400)
-			return
-		}
+				// 全部字段必填校验
+				if req.Name == "" || req.Alias == "" || req.Description == "" {
+					http.Error(w, `{"error":"name, alias, description 全部字段必填"}`, 400)
+					return
+				}
 
-		// 全部字段必填校验
-		if req.Name == "" || req.Alias == "" || req.Description == "" {
-			http.Error(w, `{"error":"name, alias, description 全部字段必填"}`, 400)
-			return
-		}
+				_, err = DB.Exec(
+					"UPDATE projects SET name=?, alias=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+					req.Name, req.Alias, req.Description, projectID,
+				)
+				if err != nil {
+					http.Error(w, err.Error(), 500)
+					return
+				}
 
-		_, err = DB.Exec(
-			"UPDATE projects SET name=?, alias=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-			req.Name, req.Alias, req.Description, projectID,
-		)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
+				w.WriteHeader(204)
+				return
+			}
 		}
-
-		w.WriteHeader(204)
-		return
 	}
 
 	// GET /api/projects/:id/remote - 获取 Git 远程信息
@@ -505,6 +537,67 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		scriptsInfo := scanProjectScripts(projPath)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(scriptsInfo)
+		return
+	}
+
+	// POST /api/projects/:id/scripts/exec - 执行脚本
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/scripts/exec") {
+		pathParts := strings.Split(strings.TrimSuffix(r.URL.Path, "/scripts/exec"), "/")
+		id := pathParts[len(pathParts)-1]
+
+		// 验证 id 为有效整数（工程决议）
+		projectID, err := strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		var projPath string
+		err = DB.QueryRow("SELECT path FROM projects WHERE id = ?", projectID).Scan(&projPath)
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"项目不存在"}`, 404)
+			return
+		}
+
+		var req struct {
+			Command string `json:"command"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"无效的请求体"}`, 400)
+			return
+		}
+
+		if !isCommandAllowed(req.Command) {
+			http.Error(w, `{"error":"命令不在白名单中"}`, 403)
+			return
+		}
+
+		// 生成 job ID
+		jobID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), projectID)
+
+		// 异步执行
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+
+			args := strings.Fields(req.Command)
+			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+			cmd.Dir = projPath
+			output, err := cmd.CombinedOutput()
+
+			result := map[string]interface{}{
+				"jobId":  jobID,
+				"status": "completed",
+				"output": string(output),
+			}
+			if err != nil {
+				result["status"] = "failed"
+			}
+			log.Printf("Script exec [%s] finished: %s", jobID, result["status"])
+		}()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"jobId": jobID})
 		return
 	}
 
