@@ -708,6 +708,11 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 
 		// 获取 git 信息（在项目目录下执行）
 		gitInfo := scanGitInfo(projPath)
+		// 同时获取 README 内容和 frameworkType
+		gitInfo["readmeContent"] = scanReadme(projPath)
+		scriptsInfo := scanProjectScripts(projPath)
+		gitInfo["frameworkType"] = scriptsInfo["framework"]
+
 		if _, err := DB.Exec(`
 			UPDATE projects SET
 				git_branch=?, git_dirty=?, git_commit=?,
@@ -1100,6 +1105,22 @@ func scanProjectScripts(projPath string) map[string]interface{} {
 	}
 
 	return result
+}
+
+// scanReadme 扫描 README 文件
+func scanReadme(projPath string) string {
+	for _, name := range []string{"README.md", "README.en.md", "README.cn.md"} {
+		filePath := projPath + "/" + name
+		if data, err := os.ReadFile(filePath); err == nil {
+			content := string(data)
+			// 简单转纯文本：去掉 markdown 语法
+			content = regexp.MustCompile(`#{1,6}\s*`).ReplaceAllString(content, "")
+			content = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`).ReplaceAllString(content, "$1")
+			content = regexp.MustCompile("[*_`]+").ReplaceAllString(content, "")
+			return strings.TrimSpace(content)
+		}
+	}
+	return ""
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
