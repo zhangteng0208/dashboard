@@ -307,6 +307,42 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PUT: 更新项目标签
+	if r.Method == "PUT" && strings.Contains(r.URL.Path, "/tags") {
+		// 提取 id: /api/projects/1/tags -> id=1
+		pathParts := strings.Split(strings.TrimSuffix(r.URL.Path, "/tags"), "/")
+		id := pathParts[len(pathParts)-1]
+
+		// 验证 id 为有效整数
+		projectID, err := strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		var req struct {
+			TagIDs []int `json:"tagIds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"无效的请求体"}`, 400)
+			return
+		}
+
+		// 删除旧关联
+		DB.Exec("DELETE FROM project_tag_relations WHERE project_id = ?", projectID)
+
+		// 插入新关联
+		for _, tagID := range req.TagIDs {
+			DB.Exec(
+				"INSERT OR IGNORE INTO project_tag_relations (project_id, tag_id) VALUES (?, ?)",
+				projectID, tagID,
+			)
+		}
+
+		w.WriteHeader(204)
+		return
+	}
+
 	// POST: 扫描项目 Git 信息（需要放在添加新项目之前，因为更具体）
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/scan") {
 		// 提取 id
