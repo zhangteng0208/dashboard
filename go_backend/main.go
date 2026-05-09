@@ -483,6 +483,31 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET /api/projects/:id/scripts - 扫描项目 scripts
+	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/scripts") {
+		pathParts := strings.Split(strings.TrimSuffix(r.URL.Path, "/scripts"), "/")
+		id := pathParts[len(pathParts)-1]
+
+		// 验证 id 为有效整数（工程决议）
+		projectID, err := strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		var projPath string
+		err = DB.QueryRow("SELECT path FROM projects WHERE id = ?", projectID).Scan(&projPath)
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"项目不存在"}`, 404)
+			return
+		}
+
+		scriptsInfo := scanProjectScripts(projPath)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(scriptsInfo)
+		return
+	}
+
 	// PUT: 更新项目标签
 	if r.Method == "PUT" && strings.Contains(r.URL.Path, "/tags") {
 		// 提取 id: /api/projects/1/tags -> id=1
