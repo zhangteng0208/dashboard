@@ -399,6 +399,90 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET /api/projects/:id/diff - 获取 git diff HEAD vs working tree
+	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/diff") {
+		pathParts := strings.Split(strings.TrimSuffix(r.URL.Path, "/diff"), "/")
+		id := pathParts[len(pathParts)-1]
+
+		// 验证 id 为有效整数（工程决议）
+		projectID, err := strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		var projPath string
+		err = DB.QueryRow("SELECT path FROM projects WHERE id = ?", projectID).Scan(&projPath)
+		if err == sql.ErrNoRows {
+			http.Error(w, `{"error":"项目不存在"}`, 404)
+			return
+		}
+
+		// 30 秒超时（工程决议）
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// git diff --stat HEAD
+		cmd := exec.CommandContext(ctx, "git", "-C", projPath, "diff", "--stat", "HEAD")
+		statOut, _ := cmd.Output()
+
+		// git diff --name-only HEAD
+		cmd = exec.CommandContext(ctx, "git", "-C", projPath, "diff", "--name-only", "HEAD")
+		nameOut, _ := cmd.Output()
+
+		var changed []map[string]interface{}
+		names := strings.Split(strings.TrimSpace(string(nameOut)), "\n")
+		statLines := strings.Split(strings.TrimSpace(string(statOut)), "\n")
+
+		for i, name := range names {
+			if name == "" {
+				continue
+			}
+			additions := 0
+			deletions := 0
+			if i < len(statLines)-1 && i > 0 {
+				// 解析 stat 行: " file | 2 +++ 1 ---"
+				statLine := strings.TrimSpace(statLines[i])
+				parts := strings.Split(statLine, "|")
+				if len(parts) >= 2 {
+					nums := strings.Fields(parts[1])
+					for _, p := range nums {
+						if strings.HasSuffix(p, "+") {
+							n, _ := strconv.Atoi(strings.TrimSuffix(p, "+"))
+							additions += n
+						}
+						if strings.HasSuffix(p, "-") {
+							n, _ := strconv.Atoi(strings.TrimSuffix(p, "-"))
+							deletions += n
+						}
+					}
+				}
+			}
+			changed = append(changed, map[string]interface{}{
+				"file":      name,
+				"additions": additions,
+				"deletions": deletions,
+			})
+		}
+
+		// 统计总计
+		var totalAdd, totalDel int
+		for _, c := range changed {
+			totalAdd += c["additions"].(int)
+			totalDel += c["deletions"].(int)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"changed": changed,
+			"stats": map[string]interface{}{
+				"additions": totalAdd,
+				"deletions": totalDel,
+			},
+		})
+		return
+	}
+
 	// PUT: 更新项目标签
 	if r.Method == "PUT" && strings.Contains(r.URL.Path, "/tags") {
 		// 提取 id: /api/projects/1/tags -> id=1
