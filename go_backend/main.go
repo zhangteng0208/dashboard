@@ -343,6 +343,45 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET: 获取项目标签
+	if r.Method == "GET" && strings.Contains(r.URL.Path, "/tags") {
+		pathParts := strings.Split(strings.TrimSuffix(r.URL.Path, "/tags"), "/")
+		id := pathParts[len(pathParts)-1]
+
+		// 验证 id 为有效整数
+		projectID, err := strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		rows, err := DB.Query(`
+			SELECT t.id, t.name, t.color
+			FROM project_tags t
+			INNER JOIN project_tag_relations r ON t.id = r.tag_id
+			WHERE r.project_id = ?
+		`, projectID)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		defer rows.Close()
+
+		var tags []map[string]interface{}
+		for rows.Next() {
+			var tagID int
+			var name, color string
+			rows.Scan(&tagID, &name, &color)
+			tags = append(tags, map[string]interface{}{"id": tagID, "name": name, "color": color})
+		}
+		if tags == nil {
+			tags = []map[string]interface{}{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"tags": tags})
+		return
+	}
+
 	// POST: 扫描项目 Git 信息（需要放在添加新项目之前，因为更具体）
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/scan") {
 		// 提取 id
