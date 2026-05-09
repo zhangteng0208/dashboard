@@ -307,6 +307,48 @@ func projectsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PATCH: 更新项目别名/简介 (全部字段必填)
+	// 注意：必须放在 PUT /tags 之前，且不能用 Contains 避免误匹配 /api/projects/1/tags
+	if r.Method == "PATCH" && !strings.Contains(r.URL.Path, "/tags") {
+		pathParts := strings.Split(r.URL.Path, "/")
+		id := pathParts[len(pathParts)-1]
+
+		// 验证 id 为有效整数
+		projectID, err := strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, `{"error":"无效的项目ID"}`, 400)
+			return
+		}
+
+		var req struct {
+			Name        string `json:"name"`
+			Alias       string `json:"alias"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"无效的请求体"}`, 400)
+			return
+		}
+
+		// 全部字段必填校验
+		if req.Name == "" || req.Alias == "" || req.Description == "" {
+			http.Error(w, `{"error":"name, alias, description 全部字段必填"}`, 400)
+			return
+		}
+
+		_, err = DB.Exec(
+			"UPDATE projects SET name=?, alias=?, description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+			req.Name, req.Alias, req.Description, projectID,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		w.WriteHeader(204)
+		return
+	}
+
 	// PUT: 更新项目标签
 	if r.Method == "PUT" && strings.Contains(r.URL.Path, "/tags") {
 		// 提取 id: /api/projects/1/tags -> id=1
