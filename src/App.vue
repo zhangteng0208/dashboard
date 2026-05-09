@@ -3,6 +3,8 @@ import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import DateWeatherCard from "./components/DateWeatherCard.vue";
 import TerminalDialog from "./components/TerminalDialog.vue";
 import ClipboardDialog from "./components/ClipboardDialog.vue";
+import ProjectDialog from "./components/ProjectDialog.vue";
+import TagSelector from "./components/TagSelector.vue";
 
 // ===================================
 //   PHASE 2a: CHART HOVER STATE
@@ -56,6 +58,7 @@ const systemInfo = ref<any>(null);
 const systemDetails = ref<any>(null);
 const processes = ref<any[]>([]);
 const ports = ref<any[]>([]);
+const selectedPort = ref<any>(null);
 const loading = ref(true);
 const activeTab = ref<'processes' | 'ports'>('processes');
 const processSortKey = ref<'cpu' | 'memory' | 'name'>('cpu');
@@ -66,6 +69,10 @@ const hermesCron = ref<any[]>([]);
 const hermesGateway = ref<any>(null);
 const hermesProfiles = ref<any[]>([]);
 const hermesVersion = ref<any>(null);
+const selectedSession = ref<any>(null);
+const hermesInsights = ref<any>(null);
+const hermesSkills = ref<any[]>([]);
+const hermesQuota = ref<any>(null);
 const hermesPersonalities = ref<string[]>(['helpful', 'concise', 'technical', 'creative', 'teacher', 'kawaii', 'catgirl', 'pirate', 'shakespeare', 'surfer', 'noir', 'uwu', 'philosopher', 'hype']);
 const personalityLabels: Record<string, string> = {
   helpful: '助手',
@@ -131,6 +138,13 @@ const error = ref("");
 const backendUrl = ref("");
 const showTerminal = ref(false);
 const showClipboard = ref(false);
+const showProjectDialog = ref(false);
+const showTagDialog = ref(false);
+const currentProjectId = ref<number | null>(null);
+
+function handleTagChange() {
+  // 刷新项目详情
+}
 
 let pollTimer: number | null = null;
 let processPollTimer: number | null = null;
@@ -173,6 +187,16 @@ function getChartPath(data: any[], key: 'cpu' | 'memory', maxVal: number): strin
     return `${i * step},${y}`;
   });
   return `M0,${h} L${points.join(' L')} L${w},${h} Z`;
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1000000) {
+    return (tokens / 1000000).toFixed(1) + 'M';
+  }
+  if (tokens >= 1000) {
+    return (tokens / 1000).toFixed(1) + 'K';
+  }
+  return tokens.toString();
 }
 
 const cpuChartPath = computed(() => getChartPath(historyData.value, 'cpu', 100));
@@ -287,10 +311,25 @@ async function fetchPorts() {
   }
 }
 
+function showPortDetail(port: any) {
+  selectedPort.value = port;
+}
+
+async function showSessionDetail(sessionId: string) {
+  try {
+    const res = await fetch(`${backendUrl.value}api/hermes/session/${sessionId}`);
+    if (res.ok) {
+      selectedSession.value = await res.json();
+    }
+  } catch (e) {
+    console.error("Failed to fetch session detail:", e);
+  }
+}
+
 async function fetchHermesData() {
   if (!backendUrl.value) return;
   try {
-    const [statusRes, configRes, toolsetsRes, cronRes, gatewayRes, profilesRes, versionRes] = await Promise.all([
+    const [statusRes, configRes, toolsetsRes, cronRes, gatewayRes, profilesRes, versionRes, insightsRes, skillsRes, quotaRes] = await Promise.all([
       fetch(`${backendUrl.value}api/hermes/status`).catch(() => null),
       fetch(`${backendUrl.value}api/hermes/config`).catch(() => null),
       fetch(`${backendUrl.value}api/hermes/toolsets`).catch(() => null),
@@ -298,6 +337,9 @@ async function fetchHermesData() {
       fetch(`${backendUrl.value}api/hermes/gateway-state`).catch(() => null),
       fetch(`${backendUrl.value}api/hermes/profiles`).catch(() => null),
       fetch(`${backendUrl.value}api/hermes/version`).catch(() => null),
+      fetch(`${backendUrl.value}api/hermes/insights`).catch(() => null),
+      fetch(`${backendUrl.value}api/hermes/skills`).catch(() => null),
+      fetch(`${backendUrl.value}api/hermes/quota`).catch(() => null),
     ]);
 
     if (statusRes?.ok) hermesStatus.value = await statusRes.json();
@@ -324,6 +366,18 @@ async function fetchHermesData() {
     if (versionRes?.ok) {
       const data = await versionRes.json();
       hermesVersion.value = data.version || null;
+    }
+    if (insightsRes?.ok) {
+      const data = await insightsRes.json();
+      hermesInsights.value = data.insights || null;
+    }
+    if (skillsRes?.ok) {
+      const data = await skillsRes.json();
+      hermesSkills.value = data.skills || [];
+    }
+    if (quotaRes?.ok) {
+      const data = await quotaRes.json();
+      hermesQuota.value = data.quota || null;
     }
   } catch (e) {
     console.error("Failed to fetch Hermes data:", e);
@@ -491,7 +545,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="dashboard">
+  <div class="dashboard dark">
     <div class="backend-status floating" :class="{ healthy: backendStatus?.healthy, unhealthy: backendStatus && !backendStatus.healthy }">
       <span class="status-dot"></span>
       <span class="status-text">{{ backendStatus?.healthy ? '已连接' : '离线' }}</span>
@@ -855,11 +909,56 @@ onUnmounted(() => {
               </div>
               <!-- Port List -->
               <div v-show="activeTab === 'ports'" v-if="ports.length > 0">
-                <div class="port-list">
-                  <div class="port-row" v-for="p in ports" :key="p.port">
+                <div class="port-flow">
+                  <div class="port-row" v-for="p in ports" :key="p.port" @click="showPortDetail(p)">
+                    <span class="port-indicator"></span>
                     <span class="port-num">{{ p.port }}</span>
-                    <span class="port-name" :title="p.name">{{ p.name }}</span>
+                    <span class="port-name">{{ p.name }}</span>
                     <span class="port-pid">{{ p.pid }}</span>
+                  </div>
+                </div>
+              </div>
+              <!-- Port Detail Popup -->
+              <div class="port-detail-popup" v-if="selectedPort" @click.self="selectedPort = null">
+                <div class="port-detail-content">
+                  <div class="detail-header">
+                    <span class="detail-port">{{ selectedPort.port }}</span>
+                    <span class="detail-name">{{ selectedPort.name }}</span>
+                    <button class="detail-close" @click="selectedPort = null">×</button>
+                  </div>
+                  <div class="detail-grid">
+                    <div class="detail-item">
+                      <span class="detail-label">PID</span>
+                      <span class="detail-value neon-cyan">{{ selectedPort.pid }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">协议</span>
+                      <span class="detail-value">{{ selectedPort.protocol || 'TCP' }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">状态</span>
+                      <span class="detail-value status">{{ selectedPort.status || 'LISTEN' }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">地址</span>
+                      <span class="detail-value">{{ selectedPort.address }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">用户</span>
+                      <span class="detail-value">{{ selectedPort.user }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">CPU</span>
+                      <span class="detail-value neon-magenta">{{ selectedPort.cpu }}%</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="detail-label">内存</span>
+                      <span class="detail-value neon-purple">{{ selectedPort.mem }}%</span>
+                    </div>
+                  </div>
+                  <div class="detail-path" v-if="selectedPort.path">
+                    <span class="detail-label">进程路径</span>
+                    <span class="detail-path-value">{{ selectedPort.path }}</span>
                   </div>
                 </div>
               </div>
@@ -934,22 +1033,22 @@ onUnmounted(() => {
             <!-- Quick Stats Bar -->
             <div class="hermes-stats-bar">
               <div class="stat-block">
-                <span class="stat-val neon">{{ hermesStatus?.active_sessions || 0 }}</span>
+                <span class="stat-val neon-cyan">{{ hermesStatus?.active_sessions || 0 }}</span>
                 <span class="stat-key">会话</span>
               </div>
               <div class="stat-divider"></div>
               <div class="stat-block">
-                <span class="stat-val">{{ hermesGateway?.pid || 'N/A' }}</span>
-                <span class="stat-key">PID</span>
+                <span class="stat-val neon-magenta">{{ hermesProfiles.length || 0 }}</span>
+                <span class="stat-key">配置</span>
               </div>
               <div class="stat-divider"></div>
               <div class="stat-block">
-                <span class="stat-val">{{ hermesToolsets.length || 0 }}</span>
+                <span class="stat-val neon-purple">{{ hermesToolsets.length || 0 }}</span>
                 <span class="stat-key">工具</span>
               </div>
               <div class="stat-divider"></div>
               <div class="stat-block">
-                <span class="stat-val">{{ hermesCron.length || 0 }}</span>
+                <span class="stat-val neon-blue">{{ hermesCron.length || 0 }}</span>
                 <span class="stat-key">定时</span>
               </div>
             </div>
@@ -978,10 +1077,76 @@ onUnmounted(() => {
                   </div>
                   <div class="platform-item" :class="{ connected: hermesGateway?.platforms?.feishu?.state === 'connected' }">
                     <div class="platform-icon feishu">
-                      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l6.9 3.45L12 11.09 5.1 7.63 12 4.18zM4 8.82l7 3.5v7.36l-7-3.5V8.82zm9 10.86v-7.36l7-3.5v7.36l-7 3.5z"/></svg>
+                      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 3C6.46 3 4 5.46 4 8.5v7C4 18.54 6.46 21 9.5 21h5c3.04 0 5.5-2.46 5.5-5.5v-7c0-3.04-2.46-5.5-5.5-5.5h-5zm.62 4.06c.96-.27 2-.43 3.12-.43 1.12 0 2.16.16 3.12.43l-3.12 3.67-3.12-3.67zm-1.62 5.56c0 .39.08.76.22 1.1L10 15.28l2.28-1.56c.14-.34.22-.71.22-1.1V9.06L9.5 6.28 6.5 9.06v3.56z"/></svg>
                     </div>
                     <span class="platform-name">飞书</span>
                     <span class="platform-status">{{ hermesGateway?.platforms?.feishu?.state === 'connected' ? '已连接' : '离线' }}</span>
+                  </div>
+                  <div class="platform-item" :class="{ connected: hermesGateway?.platforms?.discord?.state === 'connected' }">
+                    <div class="platform-icon discord">
+                      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+                    </div>
+                    <span class="platform-name">Discord</span>
+                    <span class="platform-status">{{ hermesGateway?.platforms?.discord?.state === 'connected' ? '已连接' : '离线' }}</span>
+                  </div>
+                  <div class="platform-item" :class="{ connected: hermesGateway?.platforms?.slack?.state === 'connected' }">
+                    <div class="platform-icon slack">
+                      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.526 2.526 0 012.52-2.52h6.313A2.527 2.527 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg>
+                    </div>
+                    <span class="platform-name">Slack</span>
+                    <span class="platform-status">{{ hermesGateway?.platforms?.slack?.state === 'connected' ? '已连接' : '离线' }}</span>
+                  </div>
+                  <div class="platform-item" :class="{ connected: hermesGateway?.platforms?.whatsapp?.state === 'connected' }">
+                    <div class="platform-icon whatsapp">
+                      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                    </div>
+                    <span class="platform-name">WhatsApp</span>
+                    <span class="platform-status">{{ hermesGateway?.platforms?.whatsapp?.state === 'connected' ? '已连接' : '离线' }}</span>
+                  </div>
+                  <div class="platform-item" :class="{ connected: hermesGateway?.platforms?.matrix?.state === 'connected' }">
+                    <div class="platform-icon matrix">
+                      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M1.22 8.36c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74zm21.56 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74zm-10.78 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74zm5.39 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74zm-5.39 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74zM12.76 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74V.74c0-.41.33-.74.74-.74zm5.39 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74V.74c0-.41.33-.74.74-.74zm-10.78 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74V.74c0-.41.33-.74.74-.74zm-5.39 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74V.74c0-.41.33-.74.74-.74zm16.17 15.24c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74zm-10.78 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74zm-5.39 0c.41 0 .74.33.74.74v5.8c0 .41-.33.74-.74.74s-.74-.33-.74-.74v-5.8c0-.41.33-.74.74-.74z"/></svg>
+                    </div>
+                    <span class="platform-name">Matrix</span>
+                    <span class="platform-status">{{ hermesGateway?.platforms?.matrix?.state === 'connected' ? '已连接' : '离线' }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Insights Block -->
+              <div class="hermes-block insights-block" v-if="hermesInsights && hermesInsights.total_tokens">
+                <div class="block-header">
+                  <span class="block-title">使用统计</span>
+                  <span class="block-count">今日</span>
+                  <div class="block-decoration"></div>
+                </div>
+                <div class="insights-grid">
+                  <div class="insight-item">
+                    <span class="insight-val neon-cyan">{{ formatTokens(hermesInsights.total_tokens) }}</span>
+                    <span class="insight-label">Tokens</span>
+                  </div>
+                  <div class="insight-item">
+                    <span class="insight-val neon-magenta">{{ hermesInsights.messages || 0 }}</span>
+                    <span class="insight-label">消息</span>
+                  </div>
+                  <div class="insight-item">
+                    <span class="insight-val neon-purple">{{ hermesInsights.tool_calls || 0 }}</span>
+                    <span class="insight-label">工具调用</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Skills Block -->
+              <div class="hermes-block skills-block" v-if="hermesSkills && hermesSkills.length > 0">
+                <div class="block-header">
+                  <span class="block-title">Skills</span>
+                  <span class="block-count">{{ hermesSkills.length }}</span>
+                  <div class="block-decoration"></div>
+                </div>
+                <div class="skills-grid">
+                  <div class="skill-item" v-for="skill in hermesSkills.slice(0, 12)" :key="skill.name">
+                    <div class="skill-icon">{{ skill.icon || skill.name?.charAt(0).toUpperCase() }}</div>
+                    <span class="skill-name">{{ skill.name }}</span>
                   </div>
                 </div>
               </div>
@@ -1030,7 +1195,7 @@ onUnmounted(() => {
                   <div class="block-decoration"></div>
                 </div>
                 <div class="sessions-list">
-                  <div class="session-item" v-for="session in hermesStatus.sessions.slice(0, 4)" :key="session.id">
+                  <div class="session-item" v-for="session in hermesStatus.sessions.slice(0, 4)" :key="session.id" @click="showSessionDetail(session.id)">
                     <div class="session-avatar">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
@@ -1041,6 +1206,25 @@ onUnmounted(() => {
                       <span class="session-title">{{ session.title || '会话' }}</span>
                       <span class="session-id">{{ session.id?.slice(0, 12) }}...</span>
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Session Detail Popup -->
+              <div class="session-detail-popup" v-if="selectedSession" @click.self="selectedSession = null">
+                <div class="session-detail-content">
+                  <div class="session-detail-header">
+                    <div class="session-detail-title">{{ selectedSession.title || '会话详情' }}</div>
+                    <button class="session-detail-close" @click="selectedSession = null">×</button>
+                  </div>
+                  <div class="session-messages" v-if="selectedSession.messages?.length > 0">
+                    <div class="message-item" v-for="(msg, idx) in selectedSession.messages" :key="idx" :class="msg.role">
+                      <div class="message-role">{{ msg.role === 'user' ? '用户' : '助手' }}</div>
+                      <div class="message-content">{{ msg.content }}</div>
+                    </div>
+                  </div>
+                  <div class="session-empty" v-else>
+                    <span>暂无消息记录</span>
                   </div>
                 </div>
               </div>
@@ -1080,6 +1264,21 @@ onUnmounted(() => {
                     <span class="detail-value" :class="hermesConfig?.agent?.reasoning_effort">
                       {{ hermesConfig?.agent?.reasoning_effort || 'medium' }}
                     </span>
+                  </div>
+                </div>
+                <!-- Quota Usage -->
+                <div class="quota-section" v-if="hermesQuota?.model_remains && hermesQuota.model_remains.length > 0">
+                  <div class="quota-header">用量配额</div>
+                  <div class="quota-list">
+                    <div class="quota-item" v-for="item in hermesQuota.model_remains.slice(0, 6)" :key="item.model_name">
+                      <div class="quota-model">
+                        <span class="quota-name">{{ item.model_name }}</span>
+                        <span class="quota-usage">{{ item.current_interval_usage_count }} / {{ item.current_interval_total_count }}</span>
+                      </div>
+                      <div class="quota-bar">
+                        <div class="quota-fill" :style="{ width: Math.min((item.current_interval_usage_count / item.current_interval_total_count) * 100, 100) + '%' }"></div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1257,6 +1456,12 @@ onUnmounted(() => {
               </svg>
               <span class="quick-action-label">重启</span>
             </button>
+            <button class="quick-action-btn" @click="showProjectDialog = true" title="项目管理">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span class="quick-action-label">项目</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1270,6 +1475,17 @@ onUnmounted(() => {
     <ClipboardDialog
       :visible="showClipboard"
       @close="showClipboard = false"
+    />
+
+    <ProjectDialog
+      v-model="showProjectDialog"
+    />
+
+    <TagSelector
+      v-if="currentProjectId !== null"
+      v-model="showTagDialog"
+      :projectId="currentProjectId"
+      @change="handleTagChange"
     />
 
   </div>
@@ -2745,49 +2961,310 @@ body {
   color: #94a3b8;
 }
 
-/* Port List */
-.port-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-  gap: 6px;
+/* Port Flow - Data Stream Style */
+.port-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .port-row {
   display: flex;
-  flex-direction: column;
-  padding: 6px 8px;
-  background: rgba(255,255,255,0.03);
-  border-radius: 6px;
   align-items: center;
-  font-size: 10px;
-  transition: background 0.15s;
+  padding: 8px 12px;
+  background: linear-gradient(90deg, rgba(0, 255, 249, 0.08) 0%, rgba(0, 212, 255, 0.04) 50%, transparent 100%);
+  border-left: 2px solid var(--neon-cyan);
+  border-radius: 0 4px 4px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
 }
 
-.port-row:hover { background: rgba(255,255,255,0.08); }
+.port-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, rgba(0, 255, 249, 0.15), transparent);
+  transition: width 0.3s ease;
+}
+
+.port-row:hover {
+  background: linear-gradient(90deg, rgba(0, 255, 249, 0.15) 0%, rgba(0, 212, 255, 0.08) 50%, transparent 100%);
+  transform: translateX(4px);
+}
+
+.port-row:hover::before {
+  width: 100%;
+}
+
+.port-indicator {
+  width: 6px;
+  height: 6px;
+  background: var(--neon-cyan);
+  border-radius: 50%;
+  margin-right: 12px;
+  box-shadow: 0 0 8px var(--neon-cyan);
+  animation: flow-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes flow-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--neon-cyan); }
+  50% { opacity: 0.5; box-shadow: 0 0 4px var(--neon-cyan); }
+}
+
+.port-row:hover .port-indicator {
+  box-shadow: 0 0 12px var(--neon-cyan), 0 0 20px var(--neon-cyan);
+}
 
 .port-num {
-  color: #22d3ee;
-  font-family: monospace;
+  color: var(--neon-cyan);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
+  min-width: 50px;
+  margin-right: 16px;
 }
 
 .port-name {
-  color: #94a3b8;
+  color: #e2e8f0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 100%;
-  text-align: center;
-  margin-top: 1px;
-  font-size: 9px;
 }
 
 .port-pid {
+  color: var(--neon-purple);
+  font-size: 11px;
+  margin-left: 16px;
+  opacity: 0.8;
+}
+
+/* Port Detail Popup */
+.port-detail-popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.port-detail-content {
+  background: #0a0a0f;
+  border: 1px solid var(--neon-cyan);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 350px;
+  max-width: 450px;
+  box-shadow: 0 0 30px rgba(0, 255, 249, 0.3), 0 0 60px rgba(0, 255, 249, 0.1);
+  animation: popup-appear 0.2s ease-out;
+}
+
+@keyframes popup-appear {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 255, 249, 0.2);
+}
+
+.detail-port {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 10px var(--neon-cyan);
+}
+
+.detail-name {
+  flex: 1;
+  font-size: 16px;
+  color: #e2e8f0;
+}
+
+.detail-close {
+  background: none;
+  border: none;
   color: #64748b;
-  font-family: monospace;
-  font-size: 9px;
-  margin-top: 1px;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0 8px;
+  transition: color 0.15s;
+}
+
+.detail-close:hover { color: var(--neon-magenta); }
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-label {
+  font-size: 10px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 14px;
+  color: #e2e8f0;
+}
+
+.detail-value.neon-cyan { color: var(--neon-cyan); text-shadow: 0 0 8px var(--neon-cyan); }
+.detail-value.neon-magenta { color: var(--neon-magenta); text-shadow: 0 0 8px var(--neon-magenta); }
+.detail-value.neon-purple { color: var(--neon-purple); text-shadow: 0 0 8px var(--neon-purple); }
+
+.detail-value.status {
+  color: #22c55e;
+  text-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.detail-path {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.detail-path-value {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+  word-break: break-all;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Session Detail Popup */
+.session-detail-popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+
+.session-detail-content {
+  background: #0a0a0f;
+  border: 1px solid var(--neon-purple);
+  border-radius: 12px;
+  width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 40px rgba(185, 103, 255, 0.3), 0 0 80px rgba(185, 103, 255, 0.1);
+  animation: popup-appear 0.2s ease-out;
+}
+
+.session-detail-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(185, 103, 255, 0.2);
+}
+
+.session-detail-title {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-detail-close {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0 8px;
+  transition: color 0.15s;
+}
+
+.session-detail-close:hover { color: var(--neon-magenta); }
+
+.session-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.message-item {
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid #64748b;
+}
+
+.message-item.user {
+  background: rgba(0, 255, 249, 0.08);
+  border-left-color: var(--neon-cyan);
+}
+
+.message-item.assistant {
+  background: rgba(185, 103, 255, 0.08);
+  border-left-color: var(--neon-purple);
+}
+
+.message-role {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  opacity: 0.8;
+}
+
+.message-item.user .message-role { color: var(--neon-cyan); }
+.message-item.assistant .message-role { color: var(--neon-purple); }
+
+.message-content {
+  font-size: 14px;
+  color: #f1f5f9;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.session-empty {
+  padding: 40px;
+  text-align: center;
+  color: #64748b;
 }
 
 /* Responsive */
@@ -2950,8 +3427,8 @@ body {
   color: #f8fafc;
 }
 
-/* Phase 4: Hermes neon glow for active_sessions number */
-.stat-val.neon {
+/* Hermes neon glow - cyan for sessions */
+.stat-val.neon-cyan {
   color: var(--neon-cyan);
   font-weight: 800;
   font-size: 20px;
@@ -2960,12 +3437,66 @@ body {
     0 0 10px var(--neon-cyan),
     0 0 20px var(--neon-cyan),
     0 0 40px rgba(0, 255, 249, 0.4);
-  animation: neon-pulse 2s ease-in-out infinite alternate;
+  animation: neon-pulse-cyan 2s ease-in-out infinite alternate;
 }
 
-@keyframes neon-pulse {
+@keyframes neon-pulse-cyan {
   from { text-shadow: 0 0 5px var(--neon-cyan), 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan), 0 0 40px rgba(0, 255, 249, 0.4); }
   to   { text-shadow: 0 0 8px var(--neon-cyan), 0 0 15px var(--neon-cyan), 0 0 30px var(--neon-cyan), 0 0 60px rgba(0, 255, 249, 0.6); }
+}
+
+/* Hermes neon glow - magenta for PID */
+.stat-val.neon-magenta {
+  color: var(--neon-magenta);
+  font-weight: 800;
+  font-size: 20px;
+  text-shadow:
+    0 0 5px var(--neon-magenta),
+    0 0 10px var(--neon-magenta),
+    0 0 20px var(--neon-magenta),
+    0 0 40px rgba(255, 0, 255, 0.4);
+  animation: neon-pulse-magenta 2s ease-in-out infinite alternate;
+}
+
+@keyframes neon-pulse-magenta {
+  from { text-shadow: 0 0 5px var(--neon-magenta), 0 0 10px var(--neon-magenta), 0 0 20px var(--neon-magenta), 0 0 40px rgba(255, 0, 255, 0.4); }
+  to   { text-shadow: 0 0 8px var(--neon-magenta), 0 0 15px var(--neon-magenta), 0 0 30px var(--neon-magenta), 0 0 60px rgba(255, 0, 255, 0.6); }
+}
+
+/* Hermes neon glow - purple for tools */
+.stat-val.neon-purple {
+  color: var(--neon-purple);
+  font-weight: 800;
+  font-size: 20px;
+  text-shadow:
+    0 0 5px var(--neon-purple),
+    0 0 10px var(--neon-purple),
+    0 0 20px var(--neon-purple),
+    0 0 40px rgba(185, 103, 255, 0.4);
+  animation: neon-pulse-purple 2s ease-in-out infinite alternate;
+}
+
+@keyframes neon-pulse-purple {
+  from { text-shadow: 0 0 5px var(--neon-purple), 0 0 10px var(--neon-purple), 0 0 20px var(--neon-purple), 0 0 40px rgba(185, 103, 255, 0.4); }
+  to   { text-shadow: 0 0 8px var(--neon-purple), 0 0 15px var(--neon-purple), 0 0 30px var(--neon-purple), 0 0 60px rgba(185, 103, 255, 0.6); }
+}
+
+/* Hermes neon glow - blue for cron */
+.stat-val.neon-blue {
+  color: var(--neon-blue);
+  font-weight: 800;
+  font-size: 20px;
+  text-shadow:
+    0 0 5px var(--neon-blue),
+    0 0 10px var(--neon-blue),
+    0 0 20px var(--neon-blue),
+    0 0 40px rgba(0, 212, 255, 0.4);
+  animation: neon-pulse-blue 2s ease-in-out infinite alternate;
+}
+
+@keyframes neon-pulse-blue {
+  from { text-shadow: 0 0 5px var(--neon-blue), 0 0 10px var(--neon-blue), 0 0 20px var(--neon-blue), 0 0 40px rgba(0, 212, 255, 0.4); }
+  to   { text-shadow: 0 0 8px var(--neon-blue), 0 0 15px var(--neon-blue), 0 0 30px var(--neon-blue), 0 0 60px rgba(0, 212, 255, 0.6); }
 }
 
 .stat-key {
@@ -3309,7 +3840,7 @@ body {
 /* Platforms - Green accent */
 .platforms-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
@@ -3365,6 +3896,26 @@ body {
   color: #1e88e5;
 }
 
+.platform-icon.discord {
+  background: rgba(88, 101, 242, 0.15);
+  color: #5865f2;
+}
+
+.platform-icon.slack {
+  background: rgba(97, 31, 105, 0.15);
+  color: #611f69;
+}
+
+.platform-icon.whatsapp {
+  background: rgba(37, 211, 102, 0.15);
+  color: #25d366;
+}
+
+.platform-icon.matrix {
+  background: rgba(0, 188, 212, 0.15);
+  color: #00bcd4;
+}
+
 .platform-name {
   font-size: 11px;
   font-weight: 600;
@@ -3387,10 +3938,115 @@ body {
   color: #22c55e;
 }
 
+/* Insights Block */
+.insights-block {
+  margin-top: 16px;
+}
+
+.insights-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.insight-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(0, 255, 249, 0.05);
+  border: 1px solid rgba(0, 255, 249, 0.1);
+  border-radius: 8px;
+  padding: 10px 6px;
+}
+
+.insight-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.insight-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.insight-platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.insight-platform {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.platform-tag {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: capitalize;
+}
+
+.platform-tokens {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: rgba(0, 255, 249, 0.8);
+}
+
+/* Skills - Green accent */
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.skill-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: rgba(0, 255, 136, 0.05);
+  border: 1px solid rgba(0, 255, 136, 0.1);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.skill-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 255, 136, 0.05));
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #00ff88;
+  text-transform: uppercase;
+}
+
+.skill-name {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 /* Profiles - Indigo accent */
 .profiles-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 
@@ -3527,7 +4183,7 @@ body {
 
 .model-details {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
@@ -3571,6 +4227,69 @@ body {
 
 .detail-value.low {
   color: #94a3b8;
+}
+
+/* Quota Usage */
+.quota-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(168, 85, 247, 0.2);
+}
+
+.quota-header {
+  font-size: 10px;
+  color: rgba(168, 85, 247, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.quota-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quota-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.quota-model {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.quota-name {
+  font-size: 10px;
+  font-weight: 500;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.quota-usage {
+  font-size: 9px;
+  color: rgba(168, 85, 247, 0.8);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.quota-bar {
+  height: 4px;
+  background: rgba(168, 85, 247, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.quota-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #a855f7, #c084fc);
+  border-radius: 2px;
+  transition: width 0.3s ease;
 }
 
 /* Settings - Blue accent */
@@ -3617,7 +4336,7 @@ body {
 /* Safety - Amber accent */
 .safety-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
@@ -3937,4 +4656,29 @@ body::before {
     display: none;
   }
 }
+
+/* ===================================
+   ELEMENT PLUS DARK MODE OVERRIDES
+   =================================== */
+.dark {
+  --el-bg-color: #1e1e1e;
+  --el-bg-color-overlay: #2d2d2d;
+  --el-text-color-primary: #ffffff;
+  --el-text-color-regular: #a1a1a6;
+  --el-text-color-secondary: #86868b;
+  --el-text-color-placeholder: #6b6b6b;
+  --el-border-color: #444444;
+  --el-border-color-light: #333333;
+  --el-border-color-lighter: #2d2d2d;
+  --el-fill-color: #2d2d2d;
+  --el-fill-color-light: #3d3d3d;
+  --el-fill-color-lighter: #2d2d2d;
+  --el-fill-color-blank: #1e1e1e;
+  --el-color-primary: #0a84ff;
+  --el-color-success: #30d158;
+  --el-color-warning: #ff9f0a;
+  --el-color-danger: #ff453a;
+  --el-mask-color: rgba(0, 0, 0, 0.6);
+}
+
 </style>
