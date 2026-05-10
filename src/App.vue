@@ -737,9 +737,9 @@ onUnmounted(() => {
                 <div class="history-header">
                   <span class="history-title">历史趋势</span>
                   <div class="time-range-btns">
-                    <button class="time-btn" :class="{ active: historyTimeRange === '1h' }" @click="historyTimeRange = '1h'; fetchHistory()">1小时</button>
-                    <button class="time-btn" :class="{ active: historyTimeRange === '6h' }" @click="historyTimeRange = '6h'; fetchHistory()">6小时</button>
-                    <button class="time-btn" :class="{ active: historyTimeRange === '24h' }" @click="historyTimeRange = '24h'; fetchHistory()">24小时</button>
+                    <button class="time-btn" :class="{ active: historyTimeRange === '1h' }" @click="historyTimeRange = '1h'; fetchHistory()" aria-label="查看最近1小时历史数据" :aria-pressed="historyTimeRange === '1h'">1小时</button>
+                    <button class="time-btn" :class="{ active: historyTimeRange === '6h' }" @click="historyTimeRange = '6h'; fetchHistory()" aria-label="查看最近6小时历史数据" :aria-pressed="historyTimeRange === '6h'">6小时</button>
+                    <button class="time-btn" :class="{ active: historyTimeRange === '24h' }" @click="historyTimeRange = '24h'; fetchHistory()" aria-label="查看最近24小时历史数据" :aria-pressed="historyTimeRange === '24h'">24小时</button>
                   </div>
                 </div>
                 <div class="history-chart" v-if="historyData.length > 0">
@@ -852,12 +852,8 @@ onUnmounted(() => {
           <div class="panel tab-panel">
             <div class="panel-header">
               <div class="tab-buttons">
-                <button class="tab-btn" :class="{ active: activeTab === 'processes' }" @click="activeTab = 'processes'">
-                  进程列表
-                </button>
-                <button class="tab-btn" :class="{ active: activeTab === 'ports' }" @click="activeTab = 'ports'">
-                  端口占用
-                </button>
+                <button class="tab-btn" :class="{ active: activeTab === 'processes' }" @click="activeTab = 'processes'" role="tab" :aria-selected="activeTab === 'processes'" aria-label="显示进程列表">进程列表</button>
+                <button class="tab-btn" :class="{ active: activeTab === 'ports' }" @click="activeTab = 'ports'" role="tab" :aria-selected="activeTab === 'ports'" aria-label="显示端口占用列表">端口占用</button>
               </div>
             </div>
             <div class="panel-content">
@@ -1424,21 +1420,21 @@ onUnmounted(() => {
         <!-- Column 4: Quick Actions -->
         <div class="column column-4" :style="{ '--stagger-delay': '300ms', animationDelay: 'var(--stagger-delay)' }">
           <div class="quick-actions-panel">
-            <button class="quick-action-btn" @click="showTerminal = true" title="终端">
+            <button class="quick-action-btn" @click="showTerminal = true" title="终端" aria-label="打开终端">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="4 17 10 11 4 5"/>
                 <line x1="12" y1="19" x2="20" y2="19"/>
               </svg>
               <span class="quick-action-label">终端</span>
             </button>
-            <button class="quick-action-btn" @click="showClipboard = true" title="粘贴板历史">
+            <button class="quick-action-btn" @click="showClipboard = true" title="粘贴板历史" aria-label="打开剪贴板">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
                 <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
               </svg>
               <span class="quick-action-label">粘贴</span>
             </button>
-            <button class="quick-action-btn" @click="restartBackend()" :disabled="loading" title="重启后端">
+            <button class="quick-action-btn" @click="restartBackend()" :disabled="loading" title="重启后端" aria-label="重启后端服务">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M23 4v6h-6"/>
                 <path d="M1 20v-6h6"/>
