@@ -1026,7 +1026,7 @@ onUnmounted(() => {
                   <span class="hermes-subtitle">{{ hermesVersion || 'Agent Gateway' }}</span>
                 </div>
               </div>
-              <div class="hermes-status-badge" :class="{ running: hermesGateway?.gateway_state === 'running' }">
+              <div class="hermes-status-badge" :class="{ running: hermesGateway?.gateway_state === 'running' }" title="点击打开 AI 助手">
                 <span class="status-ring"></span>
                 <span class="status-text">{{ hermesGateway?.gateway_state === 'running' ? 'ONLINE' : 'OFFLINE' }}</span>
               </div>
@@ -3468,11 +3468,18 @@ body {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .hermes-status-badge.running {
   background: rgba(34, 197, 94, 0.1);
   border-color: rgba(34, 197, 94, 0.3);
+}
+
+.hermes-status-badge:hover {
+  background: rgba(255, 0, 255, 0.15);
+  border-color: rgba(255, 0, 255, 0.4);
 }
 
 .status-ring {
