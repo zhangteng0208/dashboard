@@ -894,6 +894,14 @@ onUnmounted(() => {
                   </div>
                 </div>
               </div>
+              <div v-else class="process-empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M8 12h8M12 8v8"/>
+                </svg>
+                <span class="empty-title">暂无进程数据</span>
+                <span class="empty-desc">正在等待后端返回进程信息...</span>
+              </div>
               <!-- Port List -->
               <div v-show="activeTab === 'ports'" v-if="ports.length > 0">
                 <div class="port-flow">
@@ -904,6 +912,13 @@ onUnmounted(() => {
                     <span class="port-pid">{{ p.pid }}</span>
                   </div>
                 </div>
+              </div>
+              <div v-else class="port-empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
+                  <path d="M21 21l-6-6M15 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM9 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                </svg>
+                <span class="empty-title">暂无端口占用</span>
+                <span class="empty-desc">当前没有进程占用网络端口</span>
               </div>
               <!-- Port Detail Popup -->
               <div class="port-detail-popup" v-if="selectedPort" @click.self="selectedPort = null">
@@ -2389,6 +2404,37 @@ body {
   justify-content: center;
   color: #475569;
   font-size: var(--text-xs);
+}
+
+/* Empty States */
+.process-empty-state,
+.port-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--neon-purple);
+  opacity: 0.4;
+  margin-bottom: var(--space-3);
+}
+
+.empty-title {
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+.empty-desc {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 /* Process Search */
