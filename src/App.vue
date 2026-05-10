@@ -3,8 +3,6 @@ import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import DateWeatherCard from "./components/DateWeatherCard.vue";
 import TerminalDialog from "./components/TerminalDialog.vue";
 import ClipboardDialog from "./components/ClipboardDialog.vue";
-import ProjectDialog from "./components/ProjectDialog.vue";
-import TagSelector from "./components/TagSelector.vue";
 
 // ===================================
 //   PHASE 2a: CHART HOVER STATE
@@ -138,13 +136,6 @@ const error = ref("");
 const backendUrl = ref("");
 const showTerminal = ref(false);
 const showClipboard = ref(false);
-const showProjectDialog = ref(false);
-const showTagDialog = ref(false);
-const currentProjectId = ref<number | null>(null);
-
-function handleTagChange() {
-  // 刷新项目详情
-}
 
 let pollTimer: number | null = null;
 let processPollTimer: number | null = null;
@@ -1456,12 +1447,6 @@ onUnmounted(() => {
               </svg>
               <span class="quick-action-label">重启</span>
             </button>
-            <button class="quick-action-btn" @click="showProjectDialog = true" title="项目管理">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-              </svg>
-              <span class="quick-action-label">项目</span>
-            </button>
           </div>
         </div>
       </div>
@@ -1475,17 +1460,6 @@ onUnmounted(() => {
     <ClipboardDialog
       :visible="showClipboard"
       @close="showClipboard = false"
-    />
-
-    <ProjectDialog
-      v-model="showProjectDialog"
-    />
-
-    <TagSelector
-      v-if="currentProjectId !== null"
-      v-model="showTagDialog"
-      :projectId="currentProjectId"
-      @change="handleTagChange"
     />
 
   </div>
@@ -1539,12 +1513,44 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
+/* Focus visible states - A11y */
+:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--bg-dark);
   color: var(--text-primary);
   min-height: 100vh;
+  min-height: 100dvh; /* iOS Safari / Apple 设备兼容 */
   -webkit-font-smoothing: antialiased;
+  /* Safari/iOS 兼容：防止动态工具栏影响布局 */
+  overflow-x: hidden;
+}
+
+/* Safari 15+ 修复：解除 body's 最小高度限制以便 dvh 生效 */
+@supports (height: 100dvh) {
+  body {
+    min-height: 100dvh;
+  }
+}
+
+/* iOS Safari 特殊修复：解决 safe-area-inset 问题 */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .dashboard {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -1554,6 +1560,7 @@ body {
 
 .dashboard {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
 }
 
@@ -1561,6 +1568,7 @@ body {
 .backend-status.floating {
   position: fixed;
   bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -1684,7 +1692,8 @@ body {
 
 /* Main */
 .main {
-  height: calc(100vh - 48px);
+  height: calc(100dvh - 48px);
+  height: calc(100vh - 48px); /* 回退方案 */
 }
 
 .error-banner {
@@ -1707,7 +1716,42 @@ body {
   display: grid;
   grid-template-columns: 1fr 1.2fr 1fr 80px;
   gap: 24px;
-  height: calc(100vh - 48px);
+  height: calc(100dvh - 48px);
+  height: calc(100vh - 48px); /* 回退方案 */
+  overflow: hidden; /* 防止溢出 */
+}
+
+/* 确保 iOS Safari 上 columns 不会溢出 */
+@supports (height: 100dvh) {
+  .columns {
+    height: calc(100dvh - 48px);
+  }
+}
+
+/* 窄屏幕适配 - iPad 分辨率 */
+@media (max-width: 1024px) {
+  .columns {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto;
+    height: auto;
+    overflow-y: auto;
+  }
+
+  .column-4 {
+    grid-column: span 2;
+  }
+}
+
+/* 更窄屏幕 */
+@media (max-width: 768px) {
+  .columns {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .column-4 {
+    grid-column: span 1;
+  }
 }
 
 .column {
@@ -1715,6 +1759,7 @@ body {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .column-1 {
@@ -1723,6 +1768,7 @@ body {
   border-radius: 20px;
   padding: 16px;
   transition: border-color 0.3s, box-shadow 0.3s;
+  overflow: hidden;
 }
 
 .column-1:hover {
@@ -1746,6 +1792,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* Panel - Cyberpunk Card Base */
